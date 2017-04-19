@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>gis</title>
+		<style type="text/css">
+			#map{
+				width:1320px;
+				height:650px;
+				border: 1px solid green;
+			}
+			#menubar{
+				width:1550px;
+				height:100px;
+				margin-top: 10px;
+			}
+		</style>
+		<script type="text/javascript" src="js/gis/lib/OpenLayers.js"></script>
+		<script type="text/javascript" src="js/gis/lib/Heatmap-OpenLayers/heatmap.js"></script>
+		<script type="text/javascript" src="js/gis/lib/Heatmap-OpenLayers/heatmap-openlayers.js"></script>
+		<script type="text/javascript">
+			var map, layer;
+			var markers;//标记层
+			var marker;//标记
+			var polgyonControl;//画多边形控制
+			var lineControl,areaControl;//测距、面积控制
+			var control;//获取多边形坐标控制
+			var styleMap;//测量样式绘制
+    		var cacheUrl="http://127.0.0.1:8080";//访问瓦片图层地址
+    		var lon=108.35425881284/1;
+    		var lat =22.827408471049/1;
+   			var zoom = 12; //初始化地图级别
+   			//编辑图层
+			function init(){
+        		initMap();
+			}
+			
+			/**
+			 * 初始化地图
+			 */
+			function initMap(){
+				layer = new OpenLayers.Layer.WMS(
+					 "中国",
+					 cacheUrl+"/RGIS_Server/service/wms",
+					 {
+			            layers: 'GXSL',
+			            isBaseLayer: true,
+			            format: 'image/png',
+			            tiled: 'true',
+			            buffer: 4
+			         },{displayInLayerSwitcher:false}
+				);
+				// create map
+			    map = new OpenLayers.Map({
+		    			div:"map",
+		    			controls: [
+		    			           new OpenLayers.Control.Navigation(),  //双击放大,平移
+		    			           new OpenLayers.Control.PanZoomBar(),  //加载缩放工具条
+		    			           new OpenLayers.Control.MousePosition(),  //鼠标移动定位
+		    			           /*new OpenLayers.Control.SelectFeature(vectors,{
+		    			        	   hover:false,
+		    			        	   onUnselect:onFeatureUnselect
+		    			           }),*/
+		   			           	   //new OpenLayers.Control.OverviewMap(), //添加鹰眼控件
+		    			           //new OpenLayers.Control.LayerSwitcher(),//图层Switcher控件	
+		    			           //new OpenLayers.Control.ScaleLine(), //比例线
+		    			           new OpenLayers.Control.KeyboardDefaults()
+		    			           ],
+		    			numZoomLevels: 15,
+		    			MaxExtent:"4",
+		    			//resolutions:[0.703125,0.3515625,0.17578125,0.087890625,0.0439453125,0.02197265625,0.010986328125,0.0054931640625,0.00274658203125],
+		    			resolutions:[1.40625,0.703125,0.3515625,0.17578125,0.087890625,0.0439453125,0.02197265625,0.010986328125,0.0054931640625,0.00274658203125,0.001373291015625,0.0006866455078125,3.4332275390625e-4,1.71661376953125e-4,8.58306884765625e-5,4.291534423828125e-5],
+		    
+		    			projection:"EPSG:4326"
+			    });
+				navHistory = new OpenLayers.Control.NavigationHistory();
+			    map.addControl(navHistory);
+				map.addLayers([layer]);
+        		map.setCenter(new OpenLayers.LonLat(lon,lat),zoom);
+				/**
+				 * 添加标记层
+				 */
+				makers = new OpenLayers.Layer.Markers("makers");
+				map.addLayer(makers);
+				
+				//注册map点击事件
+        		map.events.register("click",map,onMapClick);
+        		
+        		//测距、面积样式设计
+        		var sketchSymbolizers = {
+					"Point":{
+						pointRadius:4,
+						graphicName:"square",
+						fillColor:"white",
+						fillOpacity:1,
+						strokeWidth:1,
+						strokeOpacity:1,
+						strokeColor:"#333333"
+					},
+					"Line":{
+						strokeWidth:3,
+						strokeOpacity:1,
+						strokeColor:"red",
+						//strokeDashstyle:"dash"
+						strokeDashstyle:"solid"
+					},
+					"Polygon":{
+						fillColor:"white",
+						fillOpacity:0.3,
+						strokeWidth:2,
+						strokeOpacity:1,
+						strokeColor:"#ffffff"
+					}
+				};
+				var style = new OpenLayers.Style();
+				style.addRules([new OpenLayers.Rule({symbolizer:sketchSymbolizers})]);
+				styleMap = new OpenLayers.StyleMap({"default":style});
+			}
+			
+			/**
+			 * 注册map点击事件
+			 * @param {Object} e
+			 */
+			function onMapClick(e){
+				//console.log(e.target);
+				var lonlat = map.getLonLatFromViewPortPx(e.xy);
+        		//console.log(lonlat);
+        		console.log("{lat:"+lonlat.lat+",lon:"+lonlat.lon+",count:1}");
+			}
+			/**
+			 * 缩小
+			 */
+			function zoomOut(){
+				map.zoomOut();
+			}
+			/**
+			 * 放大
+			 */
+			function zoomIn(){
+				map.zoomIn();
+			}
+			function getMapSize(){
+				alert(map.getSize());
+			}
+			/**
+			 * 测量线路
+			 */
+			function lineMeasure(){
+				//console.log("hello");
+				if(areaControl!=null||areaControl!=undefined){
+					areaControl.deactivate();
+				}
+				var renderer = OpenLayers.Util.getParameters(window.location.href).renderer;
+				lineControl = new OpenLayers.Control.Measure(
+					OpenLayers.Handler.Path,{
+						persist:true,
+						handlerOptions:{
+							layerOptions:{
+								renderers:renderer,
+								styleMap:styleMap
+							}
+						}
+					}
+				);
+				
+				lineControl.events.on({
+					"measure":handleMeasurements,
+					"measurepartial":handleMeasurements
+				});
+				
+				map.addControl(lineControl);
+				lineControl.activate();
+				//clearAll();
+			}
+			
+			/**
+			 * 测量面积
+			 */
+			function polygonMeasure(){
+				if(lineControl!=null||lineControl!=undefined){
+					lineControl.deactivate();
+				}
+				var renderer = OpenLayers.Util.getParameters(window.location.href).renderer;
+				areaControl = new OpenLayers.Control.Measure(
+					OpenLayers.Handler.Polygon,{
+						persist:true,
+						handlerOptions:{
+							layerOptions:{
+								renderers:renderer,
+								styleMap:styleMap
+							}
+						}
+					}
+				);
+				
+				areaControl.events.on({
+					"measure":handleMeasurements,
+					"measurepartial":handleMeasurements
+				});
+				
+				map.addControl(areaControl);
+				areaControl.activate();
+				//clearAll();
+			}
+			/**
+			 * 测距、面积
+			 * @param {Object} e
+			 */
+			function handleMeasurements(e){
+				var geometry = e.geometry;
+				var units = e.units;
+				var order = e.order;
+				var measure = e.measure;
+				if(order == 1){
+					console.log("measure:"+measure.toFixed(3)+" "+units);
+				}else{
+					console.log("measure:"+measure.toFixed(3)+" "+units);
+				}
+			}
+			/**
+			 * 添加标记
+			 */
+			function addMarker(){
+				var size = new OpenLayers.Size(21,25);
+				var offset = new OpenLayers.Pixel(-(size.w/2),-size.h);
+				var icon = new OpenLayers.Icon('js/gis/img/marker.png',size,offset);
+				var lonlat = new OpenLayers.LonLat(108.31820992368,22.816422142924);
+				marker = new OpenLayers.Marker(lonlat,icon);
+				//设置透明度
+				marker.setOpacity(0.7);
+				makers.addMarker(marker);
+				
+				var html = "搴汀洲兮杜若，将以遗兮远者";
+				var popup = new OpenLayers.Popup(
+						"popup",
+						new OpenLayers.LonLat(108.31820992368,22.816422142924),
+						new OpenLayers.Size(200,50),
+						html,
+						false);
+				popup.setBackgroundColor("yellow");
+				popup.setBorder("1px solid red");
+				map.addPopup(popup);
+				popup.hide();
+				//注册移到标记事件
+				marker.events.register("mouseover",marker,function(e){
+					popup.show();
+				});
+				//注册移除标记事件
+				marker.events.register("mouseout",marker,function(e){
+					popup.hide();
+				});
+			}
+			/**
+			 * 移动地图
+			 */
+			function moveMap(){
+				//添加双击放大以及移动控制
+				//map.addControl(new OpenLayers.Control.Navigation());
+			}
+			/**
+			 * 获取多边形坐标
+			 */
+			function getCoordinate(){
+				control = new OpenLayers.Control();
+				OpenLayers.Util.extend(control,{
+					draw:function(){
+						this.polygon = new OpenLayers.Handler.Polygon(control,
+						{"done":this.notice},{"persist":true},{keyMask:OpenLayers.Handler.MOD_SHIFT});
+						this.polygon.activate();
+					},
+					notice:function(bounds){
+						alert(bounds);
+					}
+				});
+				map.addControl(control);
+				//control.activate();
+			}
+			/**
+			 * 清除
+			 */
+			function clearAll(){
+				
+				//map.removeController(new OpenLayers.Control.Navigation());
+				//alert("clear");
+				/*if (vectors != null) {
+					vectors.removeAllFeatures();
+				}*/
+				//删除临时图层
+				deleteTempLayer("drawLine");
+				deleteTempLayer("drawPolygon");
+				makers.removeMarker(marker);
+				if(polgyonControl!=null||polgyonControl!=undefined){
+					polgyonControl.deactivate();
+				}
+				if(lineControl!=null||lineControl!=undefined){
+					lineControl.deactivate();
+				}
+				if(areaControl!=null||areaControl!=undefined){
+					areaControl.deactivate();
+				}
+				if(lineControl!=null||lineControl!=undefined){
+					map.removeControl(control);
+				}
+				//lineControl.deactivate();
+				/*var mymap = document.getElementById("map");
+				mymap.innerHTML = "";
+				initMap();*/
+			}
+			/**
+			 * 画线
+			 */
+			function line(){
+				var color =OpenLayers.Feature.Vector.style = {  
+				    'default': {  
+				        fillColor: "#ee9900",  
+				        fillOpacity: 0.4,   
+				        hoverFillColor: "white",  
+				        hoverFillOpacity: 0.8,  
+				        strokeColor: "#ee9900",  
+				        strokeOpacity: 1,  
+				       	strokeWidth: 1,  
+				        strokeLinecap: "round",  
+				        strokeDashstyle: "solid",  
+				        hoverStrokeColor: "red",  
+				        hoverStrokeOpacity: 1,  
+				        hoverStrokeWidth: 0.2,  
+				        pointRadius: 6,  
+				        hoverPointRadius: 1,  
+				        hoverPointUnit: "%",  
+				        pointerEvents: "visiblePainted",  
+				        cursor: "inherit",  
+				        fontColor: "#000000",  
+				        labelAlign: "cm",  
+				        labelOutlineColor: "white",  
+				        labelOutlineWidth: 3  
+				    },  
+				    'select': {  
+				        fillColor: "blue",  
+				        fillOpacity: 0.4,   
+				        hoverFillColor: "white",  
+				        hoverFillOpacity: 0.8,  
+				        strokeColor: "blue",  
+				        strokeOpacity: 1,  
+				        strokeWidth: 2,  
+				        strokeLinecap: "round",  
+				        strokeDashstyle: "solid",  
+				        hoverStrokeColor: "red",  
+				        hoverStrokeOpacity: 1,  
+				        hoverStrokeWidth: 0.2,  
+				        pointRadius: 6,  
+				        hoverPointRadius: 1,  
+				        hoverPointUnit: "%",  
+				        pointerEvents: "visiblePainted",  
+				        cursor: "pointer",  
+				        fontColor: "#000000",  
+				        labelAlign: "cm",  
+				        labelOutlineColor: "white",  
+				        labelOutlineWidth: 3  
+				  
+				    },  
+				    'temporary': {  
+				        fillColor: "#66cccc",  
+				        fillOpacity: 0.2,   
+				        hoverFillColor: "white",  
+				        hoverFillOpacity: 0.8,  
+				        strokeColor: "#66cccc",  
+				        strokeOpacity: 1,  
+				        strokeLinecap: "round",  
+				        strokeWidth: 2,  
+				        strokeDashstyle: "solid",  
+				        hoverStrokeColor: "red",  
+				        hoverStrokeOpacity: 1,  
+				        hoverStrokeWidth: 0.2,  
+				        pointRadius: 6,  
+				        hoverPointRadius: 1,  
+				        hoverPointUnit: "%",  
+				        pointerEvents: "visiblePainted",  
+				        cursor: "inherit",  
+				        fontColor: "#000000",  
+				        labelAlign: "cm",  
+				        labelOutlineColor: "white",  
+				        labelOutlineWidth: 3  
+				  
+				    },  
+				    'delete': {  
+				        display: "none"  
+				    }  
+				}  ;
+				//-35.554515625,60.30703125,-32.85187890625,62.152734375
+				var pointList=[];
+				var lineFeature;
+				var newPoint1 =new OpenLayers.Geometry.Point('108.31168679136','22.829811730326');
+				var newPoint2 =new OpenLayers.Geometry.Point('116.15581826107','39.887833275736');
+				var newPoint3 =new OpenLayers.Geometry.Point('99.35837868588','22.887833275736');
+				var newPoint4 =new OpenLayers.Geometry.Point('108.51168679136','22.829811730326');
+				pointList.push(newPoint1);
+				//pointList.push(newPoint2);
+				//pointList.push(newPoint3);
+				pointList.push(newPoint4);
+				var renderer = OpenLayers.Util.getParameters(window.location.href).renderer;
+			    renderer = (renderer) ? [renderer] : OpenLayers.Layer.Vector.prototype.renderers;
+				//console.log("renderer:"+renderer);
+			    var vectors = new OpenLayers.Layer.Vector("drawLine", {
+			        renderers: renderer
+			    });
+				//lineFeature = new OpenLayers.Feature.Vector(newPoint1,null,color.temporary);
+				var cc =  {  
+			        strokeColor: "#A913A9",  
+			        strokeOpacity: 0.5,  
+			        strokeLinecap: "round",  
+			        strokeWidth: 2,  
+			        strokeDashstyle: "solid",  
+			        labelOutlineWidth: 3  
+		    	}; 
+		    	//console.log();
+				lineFeature = new OpenLayers.Feature.Vector(new OpenLayers.Geometry.LineString(pointList),null,cc);
+				//console.log(lineFeature);
+				vectors.addFeatures(lineFeature);
+				map.addLayers([vectors]);
+				
+				vectors.events.register("mouseover",vectors,function(e){
+					var tagName;
+					if(e.toElement!=null||e.toElement!=undefined){
+						tagName = e.toElement.tagName;
+						//console.log(e.toElement.tagName);
+						if(tagName == "polyline"){
+							vectors.removeFeatures([lineFeature]);
+							//cc.strokeColor = "green";
+							cc.strokeWidth = 3;
+							cc.strokeOpacity = 1;
+							lineFeature = new OpenLayers.Feature.Vector(new OpenLayers.Geometry.LineString(pointList),null,cc);
+							vectors.addFeatures(lineFeature);
+						}else{
+							vectors.removeFeatures([lineFeature]);
+							cc.strokeOpacity = 0.5;
+							cc.strokeWidth = 2;
+							lineFeature = new OpenLayers.Feature.Vector(new OpenLayers.Geometry.LineString(pointList),null,cc);
+							vectors.addFeatures(lineFeature);
+						}
+					}
+				});
+				
+				/*vectors.events.register("mouseout",lineFeature,function(e){
+					
+					//console.log("drawLine");
+					var tagName;
+					if(e.toElement!=null||e.toElement!=undefined){
+						tagName = e.toElement.tagName;
+						//console.log(e.toElement.tagName);
+						if(tagName != "polyline"){
+							vectors.removeFeatures([lineFeature]);
+							cc.strokeColor = "#A913A9";
+							cc.strokeWidth = 2;
+							lineFeature = new OpenLayers.Feature.Vector(new OpenLayers.Geometry.LineString(pointList),null,cc);
+							vectors.addFeatures(lineFeature);
+						}
+					}
+				});*/
+			}
+			/**
+			 * 画多边形
+			 */
+			function drawPolygon(){
+				var color="#00AA00";
+				var renderer = OpenLayers.Util.getParameters(window.location.href).renderer;
+				var vlayer = new OpenLayers.Layer.Vector("drawPolygon", {
+					renderers: renderer});
+				polgyonControl = new OpenLayers.Control.DrawFeature(vlayer,OpenLayers.Handler.RegularPolygon,{handlerOptions:{sides:4,irregular:true}});
+				map.addLayers([vlayer]);
+    
+				map.addControl(polgyonControl);
+	
+				polgyonControl.activate();
+				
+				/*vlayer.events.register("mouseover",vlayer,function(e){
+					console.log(e.toElement);
+				});*/
+				//polgyonControl.deactivate();
+				//map.addControl(new OpenLayers.Control.Navigation());
+			}
+			/**
+			 * 释放标注内存
+			 * @param evt 获取消息事件
+			 * @returns {}
+			 */
+			function onFeatureUnselect(evt) {
+				featurePopup = evt.feature;
+				if(featurePopup != null){
+					map.removePopup(featurePopup.popup);
+				    featurePopup.popup.destroy();
+				    featurePopup.popup = null;
+				    featurePopup = null;
+				}
+			}
+			/**
+			 * 删除图层
+			 * @param null
+			 * @returns null
+			 */
+			function deleteTempLayer(tempName){
+				var layerLength = map.getLayersByName(tempName).length;
+				for ( var i = 0; i < layerLength; i++) {
+					var tempLayer = map.getLayersByName(tempName)[0];
+					if(tempLayer != null && tempLayer != undefined){
+						map.removeLayer(tempLayer);
+					}
+				}
+			}
+		</script>
+	</head>
+	<body onload="init()">
+		<div id="map" align="center"></div>
+		<div id="menubar" align="center">
+			<button onclick="zoomOut()">放大</button>
+			<button onclick="zoomIn()">缩小</button>
+			<button onclick="getMapSize()">获取地图大小</button>
+			<button onclick="moveMap()">移动</button>
+			<button onclick="line()">画线</button>
+			<button onclick="drawPolygon()">画多边形</button>
+			<button onclick="lineMeasure()">线路测量</button>
+			<button onclick="polygonMeasure()">面积测量</button>
+			<button onclick="getCoordinate()">获取多边形坐标</button>
+			<button onclick="addMarker()">添加标记</button>
+			<button onclick="clearAll()">清除</button>
+		</div>
+	</body>
+</html>
